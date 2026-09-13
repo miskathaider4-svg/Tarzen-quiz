@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini Flash client with correct model name
+# Initialize Gemini client with the stable 2.0-flash model format
 client = genai.Client(api_key="AQ.Ab8RN6JmsmTgJQ9J06eMCLo6-dOSFwUyZK4S6lwVMIy8_dW1rg")
 
 # Data structures for tracking session states and leaderboards
@@ -238,7 +238,7 @@ async def run_quiz_session(chat_id, user_id, context):
             """
 
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-2.0-flash',
                 contents=prompt,
             )
             text_output = response.text
@@ -367,4 +367,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
