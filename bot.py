@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURATION ---
 BOT_TOKEN = "8706836737:AAGZKFU9s6ueCaCVl-ryY-bApLq_hHT0ryg"
-GEMINI_API_KEY = "AQ.Ab8RN6IaLp-9gxtWBRJhEusMq8WtyPNq9OU_MxRWcmkllGJscA"
+GEMINI_API_KEY = "AIzaSyBcIM4PNx1KX5-EN2rcf8jnMZ57lYuJMlU"
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
