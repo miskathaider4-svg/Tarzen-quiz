@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini 3.6 Flash client
+# Initialize Gemini Flash client with correct model name
 client = genai.Client(api_key="AQ.Ab8RN6JmsmTgJQ9J06eMCLo6-dOSFwUyZK4S6lwVMIy8_dW1rg")
 
 # Data structures for tracking session states and leaderboards
@@ -110,7 +110,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     welcome_message = (
         "🎓 **WBBSE Madhyamik Ultimate Board Examination Bot** 🎓\n\n"
-        "Powered by **Gemini 3.6 Flash** and structured precisely for WBBSE standards.\n\n"
+        "Powered by **Gemini Flash** and structured precisely for WBBSE standards.\n\n"
         "👉 **Please select a subject to begin your customized quiz session:**"
     )
     await update.message.reply_text(welcome_message, parse_mode="Markdown", reply_markup=reply_markup)
@@ -211,7 +211,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(run_quiz_session(query.message.chat_id, user_id, context))
 
 async def run_quiz_session(chat_id, user_id, context):
-    """Executes the multi-question loop with error debugging."""
+    """Executes the multi-question loop."""
     session = USER_SESSIONS.get(user_id, {})
     subject = session.get("subject", "Bengali")
     chapter = session.get("chapter", "General")
@@ -238,11 +238,10 @@ async def run_quiz_session(chat_id, user_id, context):
             """
 
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model='gemini-2.5-flash',
                 contents=prompt,
             )
             text_output = response.text
-            logger.info(f"Gemini Raw Output: {text_output}")
 
             lines = text_output.strip().split("\n")
             q_data = {}
@@ -259,7 +258,6 @@ async def run_quiz_session(chat_id, user_id, context):
                 q_data.get("OPTION_D", "Option D")
             ]
             
-            # Ensure options are clean strings within Telegram's 100 character limit
             options = [opt[:100] for opt in options]
             q_text = q_text[:300]
 
@@ -288,12 +286,10 @@ async def run_quiz_session(chat_id, user_id, context):
                 "subject": subject
             }
 
-            # Wait for delay duration before serving the next question
             await asyncio.sleep(delay)
 
         except Exception as e:
             logger.error(f"CRITICAL ERROR generating question {i}: {e}")
-            # Send a notification message so user knows an error occurred instead of silent failure
             await context.bot.send_message(
                 chat_id=chat_id, 
                 text=f"⚠️ Error generating question {i}. Skipping to next..."
@@ -371,3 +367,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
