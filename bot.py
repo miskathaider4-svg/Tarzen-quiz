@@ -28,8 +28,8 @@ USER_SESSIONS = {}        # { user_id: {"subject": str, "chapter": str, "total_q
 # Complete WBBSE Madhyamik Syllabus Chapters mapping across all 7 subjects
 WBBSE_SYLLABUS = {
     "English": [
-        "Prose (Father's Help, Passing Away of Bapu, The Passing Away of Bapu, etc.)",
-        "Poetry (Fable, The Snail, Sea Fever, My Own True Family)",
+        "Prose (Father's Help, Passing Away of Bapu, etc.)",
+        "Poetry (Fable, The Snail, Sea Fever, etc.)",
         "Rapid Reader (Tales from Shakespeare / The Hound of the Baskervilles)",
         "Grammar & Rhetoric",
         "Writing Skills (Notice, Report, Letter Writing)"
@@ -122,7 +122,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
-    # 1. Subject Selection -> Show Chapters
     if data.startswith("sub_"):
         subject = data.replace("sub_", "")
         USER_SESSIONS[user_id] = {"subject": subject}
@@ -140,7 +139,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # 2. Chapter Selection -> Choose Number of Questions
     elif data.startswith("chap_"):
         chap_idx = int(data.replace("chap_", ""))
         sub = USER_SESSIONS.get(user_id, {}).get("subject", "Bengali")
@@ -159,7 +157,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    # 3. Question Count Selection -> Choose Time Delay
     elif data.startswith("q_"):
         q_count = int(data.replace("q_", ""))
         USER_SESSIONS[user_id]["total_q"] = q_count
@@ -174,7 +171,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    # 4. Delay Selection -> Choose Mode (Lock Poll vs Unlimited)
     elif data.startswith("delay_"):
         delay_val = int(data.replace("delay_", ""))
         USER_SESSIONS[user_id]["delay"] = delay_val
@@ -189,7 +185,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-    # 5. Mode Selection -> Select Timer or Launch Quiz Loop
     elif data.startswith("mode_"):
         mode_type = data.replace("mode_", "")
         USER_SESSIONS[user_id]["mode"] = mode_type
@@ -209,7 +204,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("🚀 Setup complete! Starting your WBBSE Madhyamik Quiz Session now...")
             asyncio.create_task(run_quiz_session(query.message.chat_id, user_id, context))
 
-    # 6. Timer Selection for Lock Mode -> Launch Quiz Loop
     elif data.startswith("timer_"):
         timer_val = int(data.replace("timer_", ""))
         USER_SESSIONS[user_id]["timer"] = timer_val
@@ -217,7 +211,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(run_quiz_session(query.message.chat_id, user_id, context))
 
 async def run_quiz_session(chat_id, user_id, context):
-    """Executes the multi-question loop according to user configuration."""
+    """Executes the multi-question loop with error debugging."""
     session = USER_SESSIONS.get(user_id, {})
     subject = session.get("subject", "Bengali")
     chapter = session.get("chapter", "General")
@@ -230,17 +224,17 @@ async def run_quiz_session(chat_id, user_id, context):
         try:
             prompt = f"""
             You are a senior WBBSE Madhyamik board examiner. 
-            Generate 1 unique Multiple Choice Question (MCQ) in Bengali language (if subject is Bengali) or relevant board language for Subject: {subject}, Chapter/Topic: {chapter}.
-            Difficulty must match standard West Bengal Board class 10 exams.
+            Generate 1 unique Multiple Choice Question (MCQ) for Subject: {subject}, Chapter/Topic: {chapter}.
+            Difficulty must match standard West Bengal Board class 10 exams. Make sure options are distinct.
             
-            Format your output strictly like this:
-            QUESTION: [Question text]
-            OPTION_A: [Option 1]
-            OPTION_B: [Option 2]
-            OPTION_C: [Option 3]
-            OPTION_D: [Option 4]
-            CORRECT: [A, B, C, or D]
-            EXPLANATION: [Short educational reasoning]
+            Provide your response strictly in the following format with exact headings:
+            QUESTION: [Insert question here]
+            OPTION_A: [First option]
+            OPTION_B: [Second option]
+            OPTION_C: [Third option]
+            OPTION_D: [Fourth option]
+            CORRECT: [A or B or C or D]
+            EXPLANATION: [Short explanation]
             """
 
             response = client.models.generate_content(
@@ -248,25 +242,34 @@ async def run_quiz_session(chat_id, user_id, context):
                 contents=prompt,
             )
             text_output = response.text
+            logger.info(f"Gemini Raw Output: {text_output}")
 
             lines = text_output.strip().split("\n")
             q_data = {}
             for line in lines:
                 if ":" in line:
-                    key, val = line.split(":", 1)
-                    q_data[key.strip()] = val.strip()
+                    parts = line.split(":", 1)
+                    q_data[parts[0].strip()] = parts[1].strip()
 
-            q_text = q_data.get("QUESTION", "সঠিক উত্তরটি নির্বাচন করো:")
+            q_text = q_data.get("QUESTION", f"Sample question {i} for {subject}?")
             options = [
-                q_data.get("OPTION_A", "A"),
-                q_data.get("OPTION_B", "B"),
-                q_data.get("OPTION_C", "C"),
-                q_data.get("OPTION_D", "D")
+                q_data.get("OPTION_A", "Option A"),
+                q_data.get("OPTION_B", "Option B"),
+                q_data.get("OPTION_C", "Option C"),
+                q_data.get("OPTION_D", "Option D")
             ]
-            correct_letter = q_data.get("CORRECT", "A").upper()
+            
+            # Ensure options are clean strings within Telegram's 100 character limit
+            options = [opt[:100] for opt in options]
+            q_text = q_text[:300]
+
+            correct_letter = q_data.get("CORRECT", "A").strip().upper()
+            if correct_letter not in ["A", "B", "C", "D"]:
+                correct_letter = "A"
+                
             mapping = {"A": 0, "B": 1, "C": 2, "D": 3}
             correct_idx = mapping.get(correct_letter, 0)
-            explanation = q_data.get("EXPLANATION", "WBBSE curriculum standard answer.")
+            explanation = q_data.get("EXPLANATION", "WBBSE curriculum standard answer.")[:200]
 
             # Send Native Telegram Poll
             poll_message = await context.bot.send_poll(
@@ -289,7 +292,12 @@ async def run_quiz_session(chat_id, user_id, context):
             await asyncio.sleep(delay)
 
         except Exception as e:
-            logger.error(f"Error generating question {i}: {e}")
+            logger.error(f"CRITICAL ERROR generating question {i}: {e}")
+            # Send a notification message so user knows an error occurred instead of silent failure
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=f"⚠️ Error generating question {i}. Skipping to next..."
+            )
             continue
 
     # Quiz Completion Summary Message
@@ -320,7 +328,7 @@ async def receive_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE
             LEADERBOARD[user_id] = {"name": username, "score": 0}
 
         if user_selection == correct_option:
-            LEADERBOARD[user_id]["score"] += 10 # +10 points per right answer
+            LEADERBOARD[user_id]["score"] += 10
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Isolated command to render the high-engagement leaderboard via /show."""
@@ -354,7 +362,7 @@ def main():
 
     # Handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("show", leaderboard_command)) # /show command for leaderboard
+    application.add_handler(CommandHandler("show", leaderboard_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(PollAnswerHandler(receive_poll_answer))
 
@@ -363,4 +371,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
