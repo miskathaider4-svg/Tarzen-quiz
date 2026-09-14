@@ -20,6 +20,7 @@ from google import genai
 # ============================================================
 
 TELEGRAM_TOKEN = "8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E"
+
 GEMINI_API_KEY = "AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w"
 
 GEMINI_MODEL = "gemini-2.5-flash"
