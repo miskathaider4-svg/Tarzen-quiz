@@ -148,7 +148,14 @@ async def send_question(message, context, user_id):
 
 
 def main():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    # PythonAnywhere free tier requires proxy routing for Telegram API calls
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .proxy_url("http://proxy.server:3128")
+        .get_updates_proxy_url("http://proxy.server:3128")
+        .build()
+    )
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
@@ -158,4 +165,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
