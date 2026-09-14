@@ -18,7 +18,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- API KEYS ---
-TELEGRAM_TOKEN = "7953336737:AAGZKU9s6ueCaCv1-ryY-bApLq_hHTOryg"
+TELEGRAM_TOKEN = "8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E"
 GEMINI_API_KEY = "AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w"
 
 # Initialize Gemini Client using the official google-genai SDK
@@ -148,7 +148,6 @@ async def send_question(message, context, user_id):
 
 
 def main():
-    # PythonAnywhere proxy setup using current python-telegram-bot syntax
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -165,3 +164,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
