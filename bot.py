@@ -752,6 +752,36 @@ async def button_handler(
             )
 
             if medium_key == "bn":
-                error_text = (
-                    "❌ দুঃখিত, এই মুহূর্তে প্রশ্ন তৈরি করা সম্ভব হয়নি。\n\n"
-                    "আবার চেষ্টা করতে নিচের বোতামট"
+    error_text = (
+        "❌ দুঃখিত, এই মুহূর্তে প্রশ্ন তৈরি করা সম্ভব হয়নি।\n\n"
+        "আবার চেষ্টা করতে নিচের বোতামটি চাপুন।"
+    )
+else:
+    error_text = (
+        "❌ Sorry, I couldn't generate the quiz right now.\n\n"
+        "Please try again."
+    )
+
+keyboard = InlineKeyboardMarkup(
+    [
+        [
+            InlineKeyboardButton(
+                "🔄 Try Again",
+                callback_data=f"difficulty:{difficulty}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 Change Subject",
+                callback_data="back:subject",
+            )
+        ],
+    ]
+)
+
+await query.edit_message_text(
+    text=error_text,
+    reply_markup=keyboard,
+)
+
+return
