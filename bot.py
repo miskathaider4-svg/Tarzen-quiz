@@ -148,12 +148,12 @@ async def send_question(message, context, user_id):
 
 
 def main():
-    # PythonAnywhere free tier requires proxy routing for Telegram API calls
+    # PythonAnywhere proxy setup using current python-telegram-bot syntax
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
-        .proxy_url("http://proxy.server:3128")
-        .get_updates_proxy_url("http://proxy.server:3128")
+        .proxy("http://proxy.server:3128")
+        .get_updates_proxy("http://proxy.server:3128")
         .build()
     )
     
