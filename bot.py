@@ -7,8 +7,6 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    MessageHandler,
-    filters,
 )
 
 # Enable logging
@@ -128,13 +126,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session["current_q"] = 0
         session["score"] = 0
         
-        await send_question(query.message, context, user_id)
+        # Send the first question
+        await send_question(query.message.chat_id, context, user_id)
+
+    elif data.startswith("ans_"):
+        selected_idx = int(data.split("_")[1])
+        session = user_sessions.get(user_id)
+        
+        if not session or "questions" not in session:
+            await query.edit_message_text("Session expired. Please type /start to begin again.")
+            return
+            
+        current_q = session["current_q"]
+        q_data = session["questions"][current_q]
+        correct_idx = q_data["answer_index"]
+        
+        if selected_idx == correct_idx:
+            session["score"] += 1
+            feedback = "✅ Correct!"
+        else:
+            correct_opt = q_data["options"][correct_idx]
+            feedback = f"❌ Wrong! The correct answer was: {correct_opt}"
+            
+        # Update current message to show feedback and remove buttons
+        await query.edit_message_text(f"{query.message.text}\n\n{feedback}")
+        
+        # Move to next question
+        session["current_q"] += 1
+        await send_question(query.message.chat_id, context, user_id)
 
 
-async def send_question(message, context, user_id):
+async def send_question(chat_id, context, user_id):
     session = user_sessions.get(user_id)
     if not session or session["current_q"] >= len(session["questions"]):
-        await message.reply_text(f"Quiz finished! 🎉 Your score: {session.get('score', 0)}/{len(session.get('questions', []))}")
+        score = session.get('score', 0)
+        total = len(session.get('questions', []))
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Quiz finished! 🎉 Your score: {score}/{total}"
+        )
         return
         
     q_data = session["questions"][session["current_q"]]
@@ -144,15 +174,18 @@ async def send_question(message, context, user_id):
         
     q_num = session["current_q"] + 1
     text = f"**Question {q_num}:**\n{q_data['question']}"
-    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
 
 
 def main():
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
-        .proxy("http://proxy.server:3128")
-        .get_updates_proxy("http://proxy.server:3128")
         .build()
     )
     
