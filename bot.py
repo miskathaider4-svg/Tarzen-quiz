@@ -1,10 +1,43 @@
+"""
+WBBSE Class 10 Madhyamik AI Quiz Bot
+====================================
+
+Tech stack:
+    - Python 3.10+
+    - python-telegram-bot 21+
+    - google-genai
+    - Gemini 2.5 Flash
+
+Designed for PythonAnywhere.
+
+Before running:
+    export TELEGRAM_TOKEN="YOUR_NEW_TELEGRAM_TOKEN"
+    export GEMINI_API_KEY="YOUR_NEW_GEMINI_API_KEY"
+
+Install:
+    pip3 install --user -U python-telegram-bot google-genai
+
+Test syntax:
+    python3 -m py_compile bot.py
+
+Run:
+    python3 bot.py
+"""
+
 import asyncio
 import json
 import logging
 import os
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from google import genai
+from google.genai import types
+
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -12,20 +45,16 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from google import genai
-
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-TELEGRAM_TOKEN = "8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E"
-
-GEMINI_API_KEY = "AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w"
+TELEGRAM_TOKEN = os.environ.get("8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E").strip()
+GEMINI_API_KEY = os.environ.get("AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w").strip()
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
-# Quiz configuration
 NUMBER_OF_QUESTIONS = 3
 
 
@@ -45,7 +74,10 @@ logger = logging.getLogger(__name__)
 # GEMINI CLIENT
 # ============================================================
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+else:
+    gemini_client = None
 
 
 # ============================================================
@@ -60,11 +92,13 @@ SUBJECTS = {
     "geography": "Geography",
 }
 
+
 DIFFICULTIES = {
     "easy": "Easy",
     "medium": "Medium",
     "hard": "Hard",
 }
+
 
 LANGUAGES = {
     "bn": "Bengali",
@@ -73,11 +107,30 @@ LANGUAGES = {
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# TEXT HELPERS
 # ============================================================
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard for selecting the medium."""
+def get_medium_name(medium_key: str) -> str:
+    """Return a readable medium name."""
+    return LANGUAGES.get(medium_key, "English")
+
+
+def get_subject_name(subject_key: str) -> str:
+    """Return a readable subject name."""
+    return SUBJECTS.get(subject_key, "Unknown")
+
+
+def get_difficulty_name(difficulty_key: str) -> str:
+    """Return a readable difficulty name."""
+    return DIFFICULTIES.get(difficulty_key, "Unknown")
+
+
+# ============================================================
+# KEYBOARDS
+# ============================================================
+
+def medium_keyboard() -> InlineKeyboardMarkup:
+    """Create the medium selection keyboard."""
 
     keyboard = [
         [
@@ -98,11 +151,14 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
 
 
 def subject_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard for selecting a subject."""
+    """Create the subject selection keyboard."""
 
     keyboard = [
         [
-            InlineKeyboardButton("➗ Mathematics", callback_data="subject:math"),
+            InlineKeyboardButton(
+                "➗ Mathematics",
+                callback_data="subject:math",
+            ),
             InlineKeyboardButton(
                 "⚛️ Physical Science",
                 callback_data="subject:physical",
@@ -136,7 +192,7 @@ def subject_keyboard() -> InlineKeyboardMarkup:
 
 
 def difficulty_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard for selecting difficulty."""
+    """Create the difficulty selection keyboard."""
 
     keyboard = [
         [
@@ -166,22 +222,24 @@ def difficulty_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
-def quiz_options_keyboard(
+def answer_keyboard(
     question_number: int,
     options: list[str],
 ) -> InlineKeyboardMarkup:
-    """Create the answer keyboard for a quiz question."""
+    """Create the answer buttons."""
 
     keyboard = []
 
+    letters = ["A", "B", "C", "D"]
+
     for index, option in enumerate(options):
-        # Telegram callback_data has a practical size limitation,
-        # so only send the option index, not the full option text.
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    f"{chr(65 + index)}. {option}",
-                    callback_data=f"answer:{question_number}:{index}",
+                    f"{letters[index]}. {option}",
+                    callback_data=(
+                        f"answer:{question_number}:{index}"
+                    ),
                 )
             ]
         )
@@ -189,67 +247,168 @@ def quiz_options_keyboard(
     return InlineKeyboardMarkup(keyboard)
 
 
-def reset_quiz(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Clear the current quiz state."""
+def retry_keyboard(
+    difficulty: str,
+) -> InlineKeyboardMarkup:
+    """Keyboard shown when Gemini generation fails."""
 
-    for key in (
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🔄 Try Again",
+                callback_data=f"difficulty:{difficulty}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 Change Subject",
+                callback_data="back:subject",
+            )
+        ],
+    ]
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+def result_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard shown after quiz completion."""
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🔄 Another Quiz",
+                callback_data="back:subject",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🏠 Start Over",
+                callback_data="back:medium",
+            )
+        ],
+    ]
+
+    return InlineKeyboardMarkup(keyboard)
+
+
+# ============================================================
+# USER STATE
+# ============================================================
+
+def clear_quiz_state(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Remove quiz-specific state."""
+
+    keys = [
         "medium",
         "subject",
         "difficulty",
         "questions",
         "current_question",
         "score",
-    ):
+        "answered",
+    ]
+
+    for key in keys:
         context.user_data.pop(key, None)
 
 
+def initialize_quiz(
+    context: ContextTypes.DEFAULT_TYPE,
+    questions: list[dict[str, Any]],
+) -> None:
+    """Initialize a new quiz."""
+
+    context.user_data["questions"] = questions
+    context.user_data["current_question"] = 0
+    context.user_data["score"] = 0
+    context.user_data["answered"] = False
+
+
 # ============================================================
-# GEMINI QUESTION GENERATION
+# GEMINI PROMPT
 # ============================================================
 
-def build_gemini_prompt(
+def build_prompt(
     language: str,
     subject: str,
     difficulty: str,
 ) -> str:
-    """Create the prompt used to generate the quiz."""
+    """Build the Gemini question-generation prompt."""
 
-    language_instruction = (
-        "Bengali (বাংলা). Use natural, student-friendly Bengali."
-        if language == "Bengali"
-        else
-        "English. Use clear, student-friendly English."
-    )
+    if language == "Bengali":
+        language_instruction = """
+Write every question and every answer option in natural,
+clear Bengali suitable for a Class 10 WBBSE Madhyamik student.
+Do not use unnecessary English words.
+Use standard Bengali educational terminology where appropriate.
+"""
+    else:
+        language_instruction = """
+Write every question and every answer option in clear,
+natural English suitable for a Class 10 WBBSE Madhyamik student.
+"""
 
-    return f"""
-You are an expert WBBSE (West Bengal Board of Secondary Education)
-Class 10 Madhyamik teacher and examination question setter.
+    prompt = f"""
+You are an expert teacher and examination question setter
+for the West Bengal Board of Secondary Education (WBBSE).
 
-Generate exactly {NUMBER_OF_QUESTIONS} high-quality multiple-choice
-questions for a Class 10 Madhyamik student.
+Generate exactly {NUMBER_OF_QUESTIONS} multiple-choice questions.
 
-Subject: {subject}
-Difficulty: {difficulty}
-Question language: {language_instruction}
+CLASS:
+Class 10 Madhyamik
 
-Requirements:
-1. Questions must be relevant to the WBBSE Class 10 Madhyamik syllabus.
-2. Do not use undergraduate, competitive-exam, or unrelated material.
-3. Each question must have exactly 4 answer options.
-4. There must be exactly one correct answer.
-5. The answer_index must be zero-based:
+BOARD:
+WBBSE - West Bengal Board of Secondary Education
+
+SUBJECT:
+{subject}
+
+DIFFICULTY:
+{difficulty}
+
+LANGUAGE:
+{language}
+
+{language_instruction}
+
+IMPORTANT REQUIREMENTS:
+
+1. Questions must be appropriate for the WBBSE Class 10
+   Madhyamik syllabus.
+
+2. Questions must test genuine subject knowledge.
+
+3. Do not ask university-level questions.
+
+4. Do not ask questions unrelated to the WBBSE syllabus.
+
+5. Generate exactly {NUMBER_OF_QUESTIONS} questions.
+
+6. Each question must have exactly four options.
+
+7. There must be exactly one correct answer.
+
+8. answer_index must be zero-based:
    0 = first option
    1 = second option
    2 = third option
-   3 = fourth option.
-6. Make the questions educational and factually accurate.
-7. Avoid ambiguous questions.
-8. Do not repeat questions.
-9. Do not include explanations.
-10. Do not include Markdown.
-11. Do not include any text before or after the JSON.
+   3 = fourth option
 
-Return STRICTLY valid JSON in exactly this structure:
+9. Do not repeat questions.
+
+10. Avoid ambiguous questions.
+
+11. Do not include explanations.
+
+12. Do not include Markdown.
+
+13. Do not include ``` or code fences.
+
+14. Return only the JSON object.
+
+The JSON must have exactly this general structure:
 
 {{
   "questions": [
@@ -267,56 +426,87 @@ Return STRICTLY valid JSON in exactly this structure:
 }}
 """
 
+    return prompt
 
-def extract_json(text: str) -> dict[str, Any]:
-    """
-    Parse Gemini output as JSON.
 
-    This also tolerates accidental Markdown code fences while still
-    validating the actual JSON structure.
-    """
+# ============================================================
+# JSON EXTRACTION
+# ============================================================
 
-    text = text.strip()
+def parse_json_response(
+    text: str,
+) -> dict[str, Any]:
+    """Safely parse Gemini's JSON response."""
 
-    if text.startswith("```"):
-        lines = text.splitlines()
+    if not text:
+        raise ValueError(
+            "Gemini returned an empty response."
+        )
 
-        # Remove opening ```json / ```
+    cleaned = text.strip()
+
+    # Remove accidental Markdown fences if Gemini adds them.
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+
         if lines:
             lines = lines[1:]
 
-        # Remove closing ```
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
 
-        text = "\n".join(lines).strip()
+        cleaned = "\n".join(lines).strip()
 
-    # First try normal JSON parsing.
+    # Normal JSON parsing.
     try:
-        return json.loads(text)
+        parsed = json.loads(cleaned)
+        return parsed
     except json.JSONDecodeError:
         pass
 
-    # Fallback: locate the outer JSON object.
-    start = text.find("{")
-    end = text.rfind("}")
+    # Fallback: locate the JSON object.
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
 
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("Gemini did not return a JSON object.")
+    if first_brace == -1 or last_brace == -1:
+        raise ValueError(
+            "No JSON object was found in Gemini response."
+        )
 
-    return json.loads(text[start:end + 1])
+    json_text = cleaned[
+        first_brace:last_brace + 1
+    ]
+
+    try:
+        parsed = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "Gemini returned invalid JSON."
+        ) from exc
+
+    return parsed
 
 
-def validate_questions(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Validate Gemini's generated quiz structure."""
+# ============================================================
+# QUESTION VALIDATION
+# ============================================================
+
+def validate_questions(
+    data: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Validate the complete Gemini quiz."""
 
     if not isinstance(data, dict):
-        raise ValueError("Gemini response is not a JSON object.")
+        raise ValueError(
+            "Gemini response is not a JSON object."
+        )
 
     questions = data.get("questions")
 
     if not isinstance(questions, list):
-        raise ValueError("'questions' must be a list.")
+        raise ValueError(
+            "'questions' is not a list."
+        )
 
     if len(questions) != NUMBER_OF_QUESTIONS:
         raise ValueError(
@@ -326,42 +516,83 @@ def validate_questions(data: dict[str, Any]) -> list[dict[str, Any]]:
 
     validated = []
 
-    for number, item in enumerate(questions, start=1):
-
+    for number, item in enumerate(
+        questions,
+        start=1,
+    ):
         if not isinstance(item, dict):
-            raise ValueError(f"Question {number} is not an object.")
+            raise ValueError(
+                f"Question {number} is invalid."
+            )
 
         question = item.get("question")
         options = item.get("options")
         answer_index = item.get("answer_index")
 
-        if not isinstance(question, str) or not question.strip():
-            raise ValueError(f"Question {number} has invalid text.")
-
-        if not isinstance(options, list) or len(options) != 4:
+        if not isinstance(question, str):
             raise ValueError(
-                f"Question {number} must contain exactly 4 options."
+                f"Question {number} text is invalid."
             )
 
-        if not all(isinstance(option, str) and option.strip()
-                   for option in options):
+        question = question.strip()
+
+        if not question:
             raise ValueError(
-                f"Question {number} contains an invalid option."
+                f"Question {number} is empty."
             )
+
+        if not isinstance(options, list):
+            raise ValueError(
+                f"Question {number} options are invalid."
+            )
+
+        if len(options) != 4:
+            raise ValueError(
+                f"Question {number} must have "
+                "exactly four options."
+            )
+
+        cleaned_options = []
+
+        for option_number, option in enumerate(
+            options,
+            start=1,
+        ):
+            if not isinstance(option, str):
+                raise ValueError(
+                    f"Question {number}, option "
+                    f"{option_number} is invalid."
+                )
+
+            option = option.strip()
+
+            if not option:
+                raise ValueError(
+                    f"Question {number}, option "
+                    f"{option_number} is empty."
+                )
+
+            cleaned_options.append(option)
 
         if (
             not isinstance(answer_index, int)
             or isinstance(answer_index, bool)
-            or answer_index not in range(4)
         ):
             raise ValueError(
-                f"Question {number} has an invalid answer_index."
+                f"Question {number} answer_index "
+                "is invalid."
+            )
+
+        if answer_index < 0 or answer_index > 3:
+            raise ValueError(
+                f"Question {number} answer_index "
+                "must be between 0 and 3."
             )
 
         validated.append(
             {
-                "question": question.strip(),
-                "options": [option.strip() for option in options],
+                "question": question,
+                "options": cleaned_options,
                 "answer_index": answer_index,
             }
         )
@@ -369,166 +600,56 @@ def validate_questions(data: dict[str, Any]) -> list[dict[str, Any]]:
     return validated
 
 
+# ============================================================
+# GEMINI API CALL
+# ============================================================
+
 async def generate_questions(
     language: str,
     subject: str,
     difficulty: str,
 ) -> list[dict[str, Any]]:
-    """
-    Generate questions with Gemini.
+    """Generate and validate questions using Gemini."""
 
-    The synchronous google-genai call is moved to a worker thread so
-    it doesn't block Telegram's asyncio event loop.
-    """
+    if gemini_client is None:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not configured."
+        )
 
-    prompt = build_gemini_prompt(
+    prompt = build_prompt(
         language=language,
         subject=subject,
         difficulty=difficulty,
     )
 
-    def call_gemini() -> str:
+    def make_request() -> str:
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+                response_mime_type="application/json",
+            ),
         )
 
         if not response.text:
-            raise ValueError("Gemini returned an empty response.")
+            raise ValueError(
+                "Gemini returned no text."
+            )
 
         return response.text
 
-    raw_response = await asyncio.to_thread(call_gemini)
-
-    data = extract_json(raw_response)
-
-    return validate_questions(data)
-
-
-# ============================================================
-# DISPLAY QUESTIONS
-# ============================================================
-
-async def send_current_question(
-    query,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> None:
-    """Display the current quiz question."""
-
-    questions = context.user_data.get("questions", [])
-    current_question = context.user_data.get("current_question", 0)
-
-    if current_question >= len(questions):
-        await finish_quiz(query, context)
-        return
-
-    quiz_question = questions[current_question]
-
-    medium = context.user_data.get("medium", "en")
-    total = len(questions)
-
-    if medium == "bn":
-        question_header = (
-            f"📝 প্রশ্ন {current_question + 1}/{total}\n\n"
-            f"{quiz_question['question']}"
-        )
-    else:
-        question_header = (
-            f"📝 Question {current_question + 1}/{total}\n\n"
-            f"{quiz_question['question']}"
-        )
-
-    await query.edit_message_text(
-        text=question_header,
-        reply_markup=quiz_options_keyboard(
-            current_question,
-            quiz_question["options"],
-        ),
+    raw_text = await asyncio.to_thread(
+        make_request
     )
 
+    parsed = parse_json_response(raw_text)
 
-async def finish_quiz(
-    query,
-    context: ContextTypes.DEFAULT_TYPE,
-) -> None:
-    """Display the final score."""
-
-    score = context.user_data.get("score", 0)
-    questions = context.user_data.get("questions", [])
-
-    total = len(questions)
-
-    medium = context.user_data.get("medium", "en")
-
-    subject_key = context.user_data.get("subject", "")
-    difficulty_key = context.user_data.get("difficulty", "")
-
-    subject = SUBJECTS.get(subject_key, "Unknown")
-    difficulty = DIFFICULTIES.get(difficulty_key, "Unknown")
-
-    if medium == "bn":
-        text = (
-            "🎉 কুইজ শেষ!\n\n"
-            f"📚 বিষয়: {subject}\n"
-            f"🎯 কঠিনতা: {difficulty}\n\n"
-            f"🏆 আপনার স্কোর: {score}/{total}\n\n"
-            "আবার খেলতে নিচের বোতামটি চাপুন।"
-        )
-
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "🔄 আবার কুইজ দিন",
-                        callback_data="back:subject",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "🏠 নতুন করে শুরু করুন",
-                        callback_data="back:medium",
-                    )
-                ],
-            ]
-        )
-
-    else:
-        percentage = round((score / total) * 100) if total else 0
-
-        text = (
-            "🎉 Quiz Complete!\n\n"
-            f"📚 Subject: {subject}\n"
-            f"🎯 Difficulty: {difficulty}\n\n"
-            f"🏆 Your Score: {score}/{total}\n"
-            f"📊 Percentage: {percentage}%\n\n"
-            "Choose an option below to play again."
-        )
-
-        keyboard = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(
-                        "🔄 Take Another Quiz",
-                        callback_data="back:subject",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        "🏠 Start Over",
-                        callback_data="back:medium",
-                    )
-                ],
-            ]
-        )
-
-    await query.edit_message_text(
-        text=text,
-        reply_markup=keyboard,
-    )
+    return validate_questions(parsed)
 
 
 # ============================================================
-# /START
+# START COMMAND
 # ============================================================
 
 async def start(
@@ -537,29 +658,239 @@ async def start(
 ) -> None:
     """Handle /start."""
 
-    reset_quiz(context)
+    clear_quiz_state(context)
+
+    user = update.effective_user
+
+    if user is not None and user.first_name:
+        greeting = (
+            f"👋 Hello, {user.first_name}!"
+        )
+    else:
+        greeting = "👋 Hello!"
 
     text = (
-        "👋 Welcome to the WBBSE Class 10 Madhyamik Quiz Bot!\n\n"
-        "Test your knowledge with AI-generated questions based "
-        "on the Madhyamik syllabus.\n\n"
-        "Please choose your medium:"
+        f"{greeting}\n\n"
+        "🎓 Welcome to the WBBSE Class 10 "
+        "Madhyamik Quiz Bot!\n\n"
+        "You will get 3 AI-generated multiple-choice "
+        "questions based on the Madhyamik syllabus.\n\n"
+        "📚 Please choose your medium:"
     )
-
-    if update.effective_user:
-        text = (
-            f"👋 Hello, {update.effective_user.first_name}!\n\n"
-            "Welcome to the WBBSE Class 10 Madhyamik Quiz Bot.\n\n"
-            "Test your knowledge with AI-generated questions based "
-            "on the Madhyamik syllabus.\n\n"
-            "Please choose your medium:"
-        )
 
     if update.message:
         await update.message.reply_text(
             text=text,
-            reply_markup=main_menu_keyboard(),
+            reply_markup=medium_keyboard(),
         )
+
+
+# ============================================================
+# SHOW SUBJECTS
+# ============================================================
+
+async def show_subjects(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Show subject selection."""
+
+    medium = context.user_data.get(
+        "medium",
+        "en",
+    )
+
+    if medium == "bn":
+        text = (
+            "📚 বাংলা মাধ্যম নির্বাচিত হয়েছে।\n\n"
+            "এখন একটি বিষয় নির্বাচন করুন:"
+        )
+    else:
+        text = (
+            "📚 English Medium selected.\n\n"
+            "Please choose a subject:"
+        )
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=subject_keyboard(),
+    )
+
+
+# ============================================================
+# SHOW DIFFICULTIES
+# ============================================================
+
+async def show_difficulties(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Show difficulty selection."""
+
+    medium = context.user_data.get(
+        "medium",
+        "en",
+    )
+
+    subject_key = context.user_data.get(
+        "subject"
+    )
+
+    subject = get_subject_name(
+        subject_key
+    )
+
+    if medium == "bn":
+        text = (
+            f"📚 বিষয়: {subject}\n\n"
+            "🎯 কঠিনতার স্তর নির্বাচন করুন:"
+        )
+    else:
+        text = (
+            f"📚 Subject: {subject}\n\n"
+            "🎯 Choose the difficulty level:"
+        )
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=difficulty_keyboard(),
+    )
+
+
+# ============================================================
+# SEND QUESTION
+# ============================================================
+
+async def send_current_question(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Send the current question."""
+
+    questions = context.user_data.get(
+        "questions",
+        [],
+    )
+
+    current = context.user_data.get(
+        "current_question",
+        0,
+    )
+
+    if not questions:
+        await query.edit_message_text(
+            "Quiz data is missing. Please use /start."
+        )
+        return
+
+    if current >= len(questions):
+        await finish_quiz(
+            query,
+            context,
+        )
+        return
+
+    quiz_question = questions[current]
+
+    medium = context.user_data.get(
+        "medium",
+        "en",
+    )
+
+    total = len(questions)
+
+    if medium == "bn":
+        text = (
+            f"📝 প্রশ্ন {current + 1}/{total}\n\n"
+            f"{quiz_question['question']}"
+        )
+    else:
+        text = (
+            f"📝 Question {current + 1}/{total}\n\n"
+            f"{quiz_question['question']}"
+        )
+
+    context.user_data["answered"] = False
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=answer_keyboard(
+            current,
+            quiz_question["options"],
+        ),
+    )
+
+
+# ============================================================
+# FINISH QUIZ
+# ============================================================
+
+async def finish_quiz(
+    query,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Display final quiz result."""
+
+    score = context.user_data.get(
+        "score",
+        0,
+    )
+
+    questions = context.user_data.get(
+        "questions",
+        [],
+    )
+
+    total = len(questions)
+
+    medium = context.user_data.get(
+        "medium",
+        "en",
+    )
+
+    subject = get_subject_name(
+        context.user_data.get(
+            "subject",
+            "",
+        )
+    )
+
+    difficulty = get_difficulty_name(
+        context.user_data.get(
+            "difficulty",
+            "",
+        )
+    )
+
+    percentage = (
+        round((score / total) * 100)
+        if total
+        else 0
+    )
+
+    if medium == "bn":
+        text = (
+            "🎉 কুইজ শেষ!\n\n"
+            f"📚 বিষয়: {subject}\n"
+            f"🎯 কঠিনতা: {difficulty}\n\n"
+            f"🏆 আপনার স্কোর: {score}/{total}\n"
+            f"📊 শতাংশ: {percentage}%\n\n"
+            "আবার কুইজ দিতে নিচের বোতাম চাপুন।"
+        )
+    else:
+        text = (
+            "🎉 Quiz Complete!\n\n"
+            f"📚 Subject: {subject}\n"
+            f"🎯 Difficulty: {difficulty}\n\n"
+            f"🏆 Your Score: {score}/{total}\n"
+            f"📊 Percentage: {percentage}%\n\n"
+            "Choose an option below to continue."
+        )
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=result_keyboard(),
+    )
 
 
 # ============================================================
@@ -570,7 +901,7 @@ async def button_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
-    """Handle all inline keyboard interactions."""
+    """Handle all inline keyboard buttons."""
 
     query = update.callback_query
 
@@ -582,36 +913,29 @@ async def button_handler(
     data = query.data or ""
 
     # --------------------------------------------------------
-    # MEDIUM SELECTION
+    # MEDIUM
     # --------------------------------------------------------
 
     if data.startswith("medium:"):
 
-        medium = data.split(":", 1)[1]
+        medium = data.split(
+            ":",
+            1,
+        )[1]
 
         if medium not in LANGUAGES:
             await query.edit_message_text(
-                "Invalid medium selection. Please use /start."
+                "Invalid medium. Please use /start."
             )
             return
 
-        context.user_data.clear()
+        clear_quiz_state(context)
+
         context.user_data["medium"] = medium
 
-        if medium == "bn":
-            text = (
-                "📚 মাধ্যম: বাংলা\n\n"
-                "এখন একটি বিষয় নির্বাচন করুন:"
-            )
-        else:
-            text = (
-                "📚 Medium: English\n\n"
-                "Please choose a subject:"
-            )
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=subject_keyboard(),
+        await show_subjects(
+            query,
+            context,
         )
 
         return
@@ -622,47 +946,47 @@ async def button_handler(
 
     if data == "back:medium":
 
-        reset_quiz(context)
+        clear_quiz_state(context)
 
         await query.edit_message_text(
-            text="Please choose your medium:",
-            reply_markup=main_menu_keyboard(),
+            text=(
+                "👋 Let's start again.\n\n"
+                "📚 Please choose your medium:"
+            ),
+            reply_markup=medium_keyboard(),
         )
 
         return
 
     # --------------------------------------------------------
-    # SUBJECT SELECTION
+    # SUBJECT
     # --------------------------------------------------------
 
     if data.startswith("subject:"):
 
-        subject = data.split(":", 1)[1]
+        subject = data.split(
+            ":",
+            1,
+        )[1]
 
         if subject not in SUBJECTS:
             await query.edit_message_text(
-                "Invalid subject selection. Please use /start."
+                "Invalid subject. Please use /start."
+            )
+            return
+
+        if "medium" not in context.user_data:
+            await query.edit_message_text(
+                "Your session expired. "
+                "Please use /start."
             )
             return
 
         context.user_data["subject"] = subject
 
-        medium = context.user_data.get("medium", "en")
-
-        if medium == "bn":
-            text = (
-                f"📚 বিষয়: {SUBJECTS[subject]}\n\n"
-                "🎯 কঠিনতার স্তর নির্বাচন করুন:"
-            )
-        else:
-            text = (
-                f"📚 Subject: {SUBJECTS[subject]}\n\n"
-                "🎯 Choose the difficulty level:"
-            )
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=difficulty_keyboard(),
+        await show_difficulties(
+            query,
+            context,
         )
 
         return
@@ -673,70 +997,121 @@ async def button_handler(
 
     if data == "back:subject":
 
-        context.user_data.pop("difficulty", None)
-        context.user_data.pop("questions", None)
-        context.user_data.pop("current_question", None)
-        context.user_data.pop("score", None)
+        context.user_data.pop(
+            "difficulty",
+            None,
+        )
 
-        medium = context.user_data.get("medium", "en")
+        context.user_data.pop(
+            "questions",
+            None,
+        )
 
-        if medium == "bn":
-            text = "📚 একটি বিষয় নির্বাচন করুন:"
-        else:
-            text = "📚 Please choose a subject:"
+        context.user_data.pop(
+            "current_question",
+            None,
+        )
 
-        await query.edit_message_text(
-            text=text,
-            reply_markup=subject_keyboard(),
+        context.user_data.pop(
+            "score",
+            None,
+        )
+
+        context.user_data.pop(
+            "answered",
+            None,
+        )
+
+        if "medium" not in context.user_data:
+            await query.edit_message_text(
+                text=(
+                    "📚 Please choose your medium:"
+                ),
+                reply_markup=medium_keyboard(),
+            )
+            return
+
+        await show_subjects(
+            query,
+            context,
         )
 
         return
 
     # --------------------------------------------------------
-    # DIFFICULTY SELECTION
+    # DIFFICULTY
     # --------------------------------------------------------
 
     if data.startswith("difficulty:"):
 
-        difficulty = data.split(":", 1)[1]
+        difficulty = data.split(
+            ":",
+            1,
+        )[1]
 
         if difficulty not in DIFFICULTIES:
             await query.edit_message_text(
-                "Invalid difficulty selection. Please use /start."
+                "Invalid difficulty. "
+                "Please use /start."
             )
             return
 
-        subject_key = context.user_data.get("subject")
-        medium_key = context.user_data.get("medium")
+        medium_key = context.user_data.get(
+            "medium"
+        )
 
-        if subject_key not in SUBJECTS or medium_key not in LANGUAGES:
+        subject_key = context.user_data.get(
+            "subject"
+        )
+
+        if medium_key not in LANGUAGES:
             await query.edit_message_text(
-                "Your session has expired. Please use /start."
+                "Your session expired. "
+                "Please use /start."
             )
             return
 
-        context.user_data["difficulty"] = difficulty
+        if subject_key not in SUBJECTS:
+            await query.edit_message_text(
+                "Your session expired. "
+                "Please use /start."
+            )
+            return
 
-        subject = SUBJECTS[subject_key]
-        language = LANGUAGES[medium_key]
-        difficulty_name = DIFFICULTIES[difficulty]
+        context.user_data["difficulty"] = (
+            difficulty
+        )
+
+        language = get_medium_name(
+            medium_key
+        )
+
+        subject = get_subject_name(
+            subject_key
+        )
+
+        difficulty_name = (
+            get_difficulty_name(difficulty)
+        )
 
         if medium_key == "bn":
             loading_text = (
                 "⏳ প্রশ্ন তৈরি হচ্ছে...\n\n"
-                f"বিষয়: {subject}\n"
-                f"কঠিনতা: {difficulty_name}\n\n"
-                "একটু অপেক্ষা করুন।"
+                f"📚 বিষয়: {subject}\n"
+                f"🎯 কঠিনতা: {difficulty_name}\n\n"
+                "একটু অপেক্ষা করুন..."
             )
         else:
             loading_text = (
                 "⏳ Generating your quiz...\n\n"
-                f"Subject: {subject}\n"
-                f"Difficulty: {difficulty_name}\n\n"
-                "Please wait."
+                f"📚 Subject: {subject}\n"
+                f"🎯 Difficulty: {difficulty_name}\n\n"
+                "Please wait..."
             )
 
-        await query.edit_message_text(text=loading_text)
+        await query.edit_message_text(
+            text=loading_text
+        )
 
         try:
             questions = await generate_questions(
@@ -747,41 +1122,319 @@ async def button_handler(
 
         except Exception as exc:
             logger.exception(
-                "Failed to generate Gemini questions: %s",
+                "Gemini question generation failed: %s",
                 exc,
             )
 
             if medium_key == "bn":
-    error_text = (
-        "❌ দুঃখিত, এই মুহূর্তে প্রশ্ন তৈরি করা সম্ভব হয়নি।\n\n"
-        "আবার চেষ্টা করতে নিচের বোতামটি চাপুন।"
-    )
-else:
-    error_text = (
-        "❌ Sorry, I couldn't generate the quiz right now.\n\n"
-        "Please try again."
-    )
+                error_text = (
+                    "❌ দুঃখিত, এই মুহূর্তে "
+                    "প্রশ্ন তৈরি করা সম্ভব হয়নি।\n\n"
+                    "আবার চেষ্টা করুন।"
+                )
+            else:
+                error_text = (
+                    "❌ Sorry, I couldn't generate "
+                    "the quiz right now.\n\n"
+                    "Please try again."
+                )
 
-keyboard = InlineKeyboardMarkup(
-    [
-        [
-            InlineKeyboardButton(
-                "🔄 Try Again",
-                callback_data=f"difficulty:{difficulty}",
+            await query.edit_message_text(
+                text=error_text,
+                reply_markup=retry_keyboard(
+                    difficulty
+                ),
             )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔙 Change Subject",
-                callback_data="back:subject",
+
+            return
+
+        initialize_quiz(
+            context,
+            questions,
+        )
+
+        await send_current_question(
+            query,
+            context,
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # ANSWER
+    # --------------------------------------------------------
+
+    if data.startswith("answer:"):
+
+        parts = data.split(":")
+
+        if len(parts) != 3:
+            await query.answer(
+                "Invalid answer.",
+                show_alert=True,
             )
-        ],
-    ]
-)
+            return
 
-await query.edit_message_text(
-    text=error_text,
-    reply_markup=keyboard,
-)
+        try:
+            question_number = int(parts[1])
+            selected_index = int(parts[2])
+        except ValueError:
+            await query.answer(
+                "Invalid answer.",
+                show_alert=True,
+            )
+            return
 
-return
+        questions = context.user_data.get(
+            "questions",
+            [],
+        )
+
+        current = context.user_data.get(
+            "current_question",
+            0,
+        )
+
+        # Protect against stale button presses.
+        if question_number != current:
+            await query.answer(
+                "This question has already been answered.",
+                show_alert=False,
+            )
+            return
+
+        if current < 0 or current >= len(
+            questions
+        ):
+            await query.answer(
+                "Quiz session expired.",
+                show_alert=True,
+            )
+            return
+
+        if selected_index < 0 or selected_index > 3:
+            await query.answer(
+                "Invalid answer.",
+                show_alert=True,
+            )
+            return
+
+        # Prevent double clicking.
+        if context.user_data.get(
+            "answered",
+            False,
+        ):
+            await query.answer(
+                "Already answered.",
+                show_alert=False,
+            )
+            return
+
+        context.user_data["answered"] = True
+
+        quiz_question = questions[current]
+
+        correct_index = quiz_question[
+            "answer_index"
+        ]
+
+        is_correct = (
+            selected_index == correct_index
+        )
+
+        if is_correct:
+            context.user_data["score"] = (
+                context.user_data.get(
+                    "score",
+                    0,
+                )
+                + 1
+            )
+
+        # Move forward.
+        context.user_data[
+            "current_question"
+        ] = current + 1
+
+        medium = context.user_data.get(
+            "medium",
+            "en",
+        )
+
+        if medium == "bn":
+
+            if is_correct:
+                feedback = (
+                    "✅ সঠিক উত্তর!"
+                )
+            else:
+                correct_option = (
+                    quiz_question["options"][
+                        correct_index
+                    ]
+                )
+
+                feedback = (
+                    "❌ ভুল উত্তর!\n\n"
+                    f"সঠিক উত্তর: {correct_option}"
+                )
+
+        else:
+
+            if is_correct:
+                feedback = "✅ Correct!"
+            else:
+                correct_option = (
+                    quiz_question["options"][
+                        correct_index
+                    ]
+                )
+
+                feedback = (
+                    "❌ Incorrect!\n\n"
+                    f"Correct answer: {correct_option}"
+                )
+
+        next_question_exists = (
+            context.user_data[
+                "current_question"
+            ] < len(questions)
+        )
+
+        await query.edit_message_text(
+            text=feedback
+        )
+
+        await asyncio.sleep(0.8)
+
+        if next_question_exists:
+            await send_current_question(
+                query,
+                context,
+            )
+        else:
+            await finish_quiz(
+                query,
+                context,
+            )
+
+        return
+
+    # --------------------------------------------------------
+    # UNKNOWN CALLBACK
+    # --------------------------------------------------------
+
+    await query.answer(
+        "Unknown selection.",
+        show_alert=True,
+    )
+
+
+# ============================================================
+# ERROR HANDLER
+# ============================================================
+
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle unexpected Telegram errors."""
+
+    logger.exception(
+        "Unhandled exception: %s",
+        context.error,
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main() -> None:
+    """Start the Telegram bot."""
+
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError(
+            "TELEGRAM_TOKEN environment variable "
+            "is not set."
+        )
+
+    if not GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY environment variable "
+            "is not set."
+        )
+
+    # --------------------------------------------------------
+    # PYTHONANYWHERE FREE-TIER PROXY
+    # --------------------------------------------------------
+
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .proxy("http://proxy.server:3128")
+        .get_updates_proxy(
+            "http://proxy.server:3128"
+        )
+        .build()
+    )
+
+    # --------------------------------------------------------
+    # TELEGRAM HANDLERS
+    # --------------------------------------------------------
+
+    application.add_handler(
+        CommandHandler(
+            "start",
+            start,
+        )
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(
+            button_handler
+        )
+    )
+
+    application.add_error_handler(
+        error_handler
+    )
+
+    logger.info(
+        "========================================"
+    )
+
+    logger.info(
+        "WBBSE Madhyamik Quiz Bot starting..."
+    )
+
+    logger.info(
+        "Gemini model: %s",
+        GEMINI_MODEL,
+    )
+
+    logger.info(
+        "Questions per quiz: %s",
+        NUMBER_OF_QUESTIONS,
+    )
+
+    logger.info(
+        "========================================"
+    )
+
+    # --------------------------------------------------------
+    # START POLLING
+    # --------------------------------------------------------
+
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+    )
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
+    main()
