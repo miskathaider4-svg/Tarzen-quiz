@@ -50,8 +50,8 @@ from telegram.ext import (
 # CONFIGURATION
 # ============================================================
 
-TELEGRAM_TOKEN = os.environ.get("8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E").strip()
-GEMINI_API_KEY = os.environ.get("AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w").strip()
+TELEGRAM_TOKEN = os.environ.get("8706836737:AAG2NjJA2g7tYUr37u--QKTsqN_-Y80Lk1E","").strip()
+GEMINI_API_KEY = os.environ.get("AQ.Ab8RN6IRsvyNA7cpoEzeVkhaZ_yhGHN9rNicxXmC2wDeCStF_w","").strip()
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
